@@ -1,0 +1,588 @@
+(function () {
+  const existing = document.getElementById("snake-win");
+  if (existing) {
+    existing.style.display = existing.style.display === "none" ? "flex" : "none";
+    return;
+  }
+
+  const STORAGE_KEY = "snake_console_best_score_v2";
+
+  const style = document.createElement("style");
+  style.textContent = `
+    #snake-win {
+      position: fixed;
+      top: 50px;
+      left: 50px;
+      width: 720px;
+      height: 620px;
+      background: #4e7cf6;
+      border: 6px solid #3c61d1;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 100000;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      resize: both;
+      min-width: 380px;
+      min-height: 420px;
+    }
+
+    #snake-header {
+      background: #4e7cf6;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      cursor: move;
+      user-select: none;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #snake-x {
+      cursor: pointer;
+      font-size: 20px;
+      padding: 0 5px;
+      line-height: 1;
+    }
+
+    #snake-x:hover { color: #ff4d4d; }
+
+    #snake-settings {
+      background: #3c61d1;
+      padding: 8px 20px;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    #snake-container {
+      flex-grow: 1;
+      position: relative;
+      background: #aad751;
+      overflow: hidden;
+    }
+
+    #snake-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+    }
+
+    #snake-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.58);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 16px;
+      box-sizing: border-box;
+      gap: 10px;
+    }
+
+    .snake-btn {
+      background: #fff;
+      color: #4e7cf6;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+
+    .snake-btn:hover { filter: brightness(0.95); }
+
+    #snake-overlay h2 {
+      margin: 0;
+      font-size: 36px;
+      letter-spacing: 1px;
+    }
+
+    #snake-overlay p {
+      margin: 0;
+      font-size: 16px;
+      opacity: 0.95;
+    }
+
+    #snake-settings select,
+    #snake-settings input {
+      border-radius: 4px;
+      border: none;
+      padding: 3px 6px;
+      font-size: 12px;
+      background: #ffffff;
+    }
+  `;
+  document.head.appendChild(style);
+
+  const win = document.createElement("div");
+  win.id = "snake-win";
+
+  const header = document.createElement("div");
+  header.id = "snake-header";
+
+  const leftHeader = document.createElement("div");
+  const scoreText = document.createElement("span");
+  scoreText.textContent = "🍎 0 ";
+  const highScoreText = document.createElement("span");
+  highScoreText.textContent = "🏆 0";
+  leftHeader.append(scoreText, highScoreText);
+
+  const rightHeader = document.createElement("div");
+  rightHeader.textContent = "Ctrl+E hide/show";
+
+  const closeBtn = document.createElement("span");
+  closeBtn.id = "snake-x";
+  closeBtn.textContent = "✖";
+
+  header.append(leftHeader, rightHeader, closeBtn);
+
+  const settings = document.createElement("div");
+  settings.id = "snake-settings";
+
+  const appleInput = document.createElement("input");
+  appleInput.type = "number";
+  appleInput.min = "1";
+  appleInput.max = "5";
+  appleInput.step = "1";
+  appleInput.value = "1";
+  appleInput.style.width = "42px";
+
+  const speedSelect = document.createElement("select");
+  const speeds = { Slow: 145, Normal: 105, Fast: 75 };
+  Object.entries(speeds).forEach(([name, value]) => {
+    const opt = document.createElement("option");
+    opt.value = String(value);
+    opt.textContent = name;
+    if (name === "Normal") opt.selected = true;
+    speedSelect.appendChild(opt);
+  });
+
+  const showGridInput = document.createElement("input");
+  showGridInput.type = "checkbox";
+  showGridInput.checked = true;
+
+  settings.append(
+    "Apples:",
+    appleInput,
+    "Speed:",
+    speedSelect,
+    "Grid:",
+    showGridInput,
+    "P = Pause"
+  );
+
+  const container = document.createElement("div");
+  container.id = "snake-container";
+
+  const canvas = document.createElement("canvas");
+  canvas.id = "snake-canvas";
+
+  const overlay = document.createElement("div");
+  overlay.id = "snake-overlay";
+  const overlayTitle = document.createElement("h2");
+  const overlayHint = document.createElement("p");
+  const startBtn = document.createElement("button");
+  startBtn.className = "snake-btn";
+  startBtn.textContent = "START";
+  overlay.append(overlayTitle, overlayHint, startBtn);
+
+  container.append(canvas, overlay);
+  win.append(header, settings, container);
+  document.body.appendChild(win);
+
+  const ctx = canvas.getContext("2d");
+
+  let isDragging = false;
+  let offX = 0;
+  let offY = 0;
+
+  header.onmousedown = (e) => {
+    if (e.target !== closeBtn) {
+      isDragging = true;
+      offX = win.offsetLeft - e.clientX;
+      offY = win.offsetTop - e.clientY;
+    }
+  };
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    win.style.left = `${e.clientX + offX}px`;
+    win.style.top = `${e.clientY + offY}px`;
+  });
+
+  document.addEventListener("mouseup", () => {
+    isDragging = false;
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === "e") {
+      e.preventDefault();
+      win.style.display = win.style.display === "none" ? "flex" : "none";
+    }
+  });
+
+  closeBtn.onclick = () => {
+    win.style.display = "none";
+  };
+
+  const cellSize = 30;
+  let snake = [];
+  let foods = [];
+  let direction = { x: 1, y: 0 };
+  let queuedDirection = { x: 1, y: 0 };
+  let score = 0;
+  let highScore = Number(localStorage.getItem(STORAGE_KEY) || 0);
+  let isDead = false;
+  let isStarted = false;
+  let isPaused = false;
+  let timer;
+
+  function clampAppleCount() {
+    const n = Number(appleInput.value);
+    const safe = Number.isFinite(n) ? Math.max(1, Math.min(5, Math.floor(n))) : 1;
+    appleInput.value = String(safe);
+    return safe;
+  }
+
+  function updateScoreText() {
+    scoreText.textContent = `🍎 ${score} `;
+    highScoreText.textContent = `🏆 ${highScore}`;
+  }
+
+  function applyCanvasSize() {
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+  }
+
+  function gridSize() {
+    return {
+      cols: Math.max(1, Math.floor(canvas.width / cellSize)),
+      rows: Math.max(1, Math.floor(canvas.height / cellSize)),
+    };
+  }
+
+  function showOverlay(title, hint, buttonText) {
+    overlayTitle.textContent = title;
+    overlayHint.textContent = hint;
+    startBtn.textContent = buttonText;
+    overlay.style.display = "flex";
+  }
+
+  function hideOverlay() {
+    overlay.style.display = "none";
+  }
+
+  function spawnFood() {
+    const { cols, rows } = gridSize();
+    let newFood;
+    let safety = 0;
+
+    do {
+      newFood = {
+        x: Math.floor(Math.random() * cols),
+        y: Math.floor(Math.random() * rows),
+      };
+      safety += 1;
+      if (safety > cols * rows) break;
+    } while (
+      snake.some((s) => s.x === newFood.x && s.y === newFood.y) ||
+      foods.some((f) => f.x === newFood.x && f.y === newFood.y)
+    );
+
+    foods.push(newFood);
+  }
+
+  function initializeSnake() {
+    const { cols, rows } = gridSize();
+    const midX = Math.max(4, Math.floor(cols / 2));
+    const midY = Math.floor(rows / 2);
+    snake = [
+      { x: midX, y: midY },
+      { x: midX - 1, y: midY },
+      { x: midX - 2, y: midY },
+    ];
+    direction = { x: 1, y: 0 };
+    queuedDirection = { x: 1, y: 0 };
+  }
+
+  function drawBoard() {
+    const { cols, rows } = gridSize();
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        const even = (x + y) % 2 === 0;
+        ctx.fillStyle = even ? "#aad751" : "#a2d149";
+        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+      }
+    }
+
+    if (showGridInput.checked) {
+      ctx.strokeStyle = "rgba(0,0,0,0.05)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= cols; x += 1) {
+        ctx.beginPath();
+        ctx.moveTo(x * cellSize + 0.5, 0);
+        ctx.lineTo(x * cellSize + 0.5, rows * cellSize);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= rows; y += 1) {
+        ctx.beginPath();
+        ctx.moveTo(0, y * cellSize + 0.5);
+        ctx.lineTo(cols * cellSize, y * cellSize + 0.5);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawFood() {
+    foods.forEach((f) => {
+      const cx = f.x * cellSize + cellSize / 2;
+      const cy = f.y * cellSize + cellSize / 2;
+      ctx.fillStyle = "#e74c3c";
+      ctx.beginPath();
+      ctx.arc(cx, cy, cellSize / 2.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#27ae60";
+      ctx.fillRect(cx - 2, cy - cellSize / 2 + 2, 4, 8);
+    });
+  }
+
+  function drawSnake() {
+    snake.forEach((segment, i) => {
+      const r = cellSize / 2 - 2;
+      const x = segment.x * cellSize + cellSize / 2;
+      const y = segment.y * cellSize + cellSize / 2;
+
+      ctx.fillStyle = i === 0 ? "#4e7cf6" : "#5b89ff";
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (i < snake.length - 1) {
+        const n = snake[i + 1];
+        ctx.fillRect(
+          x + ((n.x - segment.x) * cellSize) / 2 - r,
+          y + ((n.y - segment.y) * cellSize) / 2 - r,
+          r * 2,
+          r * 2
+        );
+      }
+
+      if (i === 0) {
+        const dx = direction.x;
+        const dy = direction.y;
+        const ex = dx !== 0 ? 7 : 5;
+        const ey = dy !== 0 ? 7 : 5;
+
+        ctx.fillStyle = "white";
+        ctx.beginPath();
+        ctx.arc(x + dx * 9 - dy * ex, y + dy * 9 - dx * ey, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x + dx * 9 + dy * ex, y + dy * 9 + dx * ey, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "black";
+        ctx.beginPath();
+        ctx.arc(x + dx * 11 - dy * ex, y + dy * 11 - dx * ey, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x + dx * 11 + dy * ex, y + dy * 11 + dx * ey, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  }
+
+  function render() {
+    drawBoard();
+    drawFood();
+    drawSnake();
+  }
+
+  function gameOver() {
+    isDead = true;
+    isStarted = false;
+    clearTimeout(timer);
+
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem(STORAGE_KEY, String(highScore));
+    }
+
+    updateScoreText();
+    showOverlay("GAME OVER", "Press Space or click to play again", "TRY AGAIN");
+  }
+
+  function tick() {
+    if (!isStarted || isDead || isPaused) return;
+
+    if (canvas.width !== container.clientWidth || canvas.height !== container.clientHeight) {
+      applyCanvasSize();
+      render();
+    }
+
+    direction = queuedDirection;
+    const head = {
+      x: snake[0].x + direction.x,
+      y: snake[0].y + direction.y,
+    };
+
+    const { cols, rows } = gridSize();
+    const outOfBounds = head.x < 0 || head.y < 0 || head.x >= cols || head.y >= rows;
+    const selfHit = snake.slice(0, -1).some((s) => s.x === head.x && s.y === head.y);
+
+    if (outOfBounds || selfHit) {
+      gameOver();
+      return;
+    }
+
+    snake.unshift(head);
+
+    let ate = false;
+    for (let i = foods.length - 1; i >= 0; i -= 1) {
+      const f = foods[i];
+      if (f.x === head.x && f.y === head.y) {
+        foods.splice(i, 1);
+        score += 1;
+        ate = true;
+      }
+    }
+
+    if (ate) {
+      while (foods.length < clampAppleCount()) {
+        spawnFood();
+      }
+    } else {
+      snake.pop();
+    }
+
+    updateScoreText();
+    render();
+
+    timer = setTimeout(tick, Number(speedSelect.value));
+  }
+
+  function startGame() {
+    clearTimeout(timer);
+    applyCanvasSize();
+    score = 0;
+    isDead = false;
+    isPaused = false;
+    isStarted = true;
+    foods = [];
+
+    initializeSnake();
+    while (foods.length < clampAppleCount()) spawnFood();
+
+    updateScoreText();
+    hideOverlay();
+    render();
+    tick();
+  }
+
+  function setDirection(next) {
+    if (!isStarted || isDead || isPaused) return;
+    const opposite = next.x === -direction.x && next.y === -direction.y;
+    if (!opposite) queuedDirection = next;
+  }
+
+  function togglePause() {
+    if (!isStarted || isDead) return;
+    isPaused = !isPaused;
+    if (isPaused) {
+      clearTimeout(timer);
+      showOverlay("PAUSED", "Press P to continue", "RESUME");
+    } else {
+      hideOverlay();
+      tick();
+    }
+  }
+
+  window.addEventListener("keydown", (e) => {
+    const key = e.key;
+
+    if (key === " " || key === "Spacebar") {
+      if (!isStarted || isDead) {
+        e.preventDefault();
+        startGame();
+      }
+      return;
+    }
+
+    if (key.toLowerCase() === "p") {
+      e.preventDefault();
+      if (!isStarted || isDead) return;
+      if (isPaused) {
+        isPaused = false;
+        hideOverlay();
+        tick();
+      } else {
+        togglePause();
+      }
+      return;
+    }
+
+    if (key === "ArrowUp") setDirection({ x: 0, y: -1 });
+    else if (key === "ArrowDown") setDirection({ x: 0, y: 1 });
+    else if (key === "ArrowLeft") setDirection({ x: -1, y: 0 });
+    else if (key === "ArrowRight") setDirection({ x: 1, y: 0 });
+  });
+
+  startBtn.onclick = () => {
+    if (!isStarted || isDead) {
+      startGame();
+      return;
+    }
+
+    if (isPaused) {
+      isPaused = false;
+      hideOverlay();
+      tick();
+    }
+  };
+
+  appleInput.addEventListener("change", () => {
+    const want = clampAppleCount();
+    if (isStarted && !isDead) {
+      while (foods.length < want) spawnFood();
+      if (foods.length > want) foods = foods.slice(0, want);
+      render();
+    }
+  });
+
+  speedSelect.addEventListener("change", () => {
+    if (isStarted && !isDead && !isPaused) {
+      clearTimeout(timer);
+      tick();
+    }
+  });
+
+  const resizeObserver = new ResizeObserver(() => {
+    applyCanvasSize();
+    render();
+  });
+  resizeObserver.observe(container);
+
+  updateScoreText();
+  applyCanvasSize();
+  initializeSnake();
+  render();
+  showOverlay("SNAKE", "Arrow keys to move • Press Space to start", "START");
+})();
